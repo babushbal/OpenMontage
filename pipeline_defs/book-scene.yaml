@@ -1,0 +1,200 @@
+name: book-scene
+version: "0.1"
+description: >
+  Book-to-scene adaptation. Ingests an uploaded book (PDF/EPUB/TXT), builds a
+  book-level character bible whose identities come from the book's own
+  illustrations when they exist, then has a director agent turn one passage into
+  a shot list where every shot is anchored to a verbatim quote. A video agent
+  renders each shot with reference-to-video (Kling O3 elements) so the same
+  character looks identical across shots and across scenes of the same book.
+category: cinematic
+stability: beta
+default_checkpoint_policy: guided
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - pipelines/book-scene/executive-producer
+  - pipelines/book-scene/ingest-director
+  - pipelines/book-scene/casting-director
+  - pipelines/book-scene/proposal-director
+  - pipelines/book-scene/scene-director
+  - pipelines/book-scene/fidelity-critic
+  - pipelines/book-scene/asset-director
+  - pipelines/cinematic/edit-director
+  - pipelines/cinematic/compose-director
+  - creative/video-gen-prompting
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/book-scene/executive-producer
+  budget_default_usd: 5.00
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 30
+
+compatible_playbooks:
+  recommended:
+    - anime-ghibli
+  also_works:
+    - clean-professional
+  custom_allowed: true
+
+stages:
+  - name: book_ingest
+    skill: pipelines/book-scene/ingest-director
+    produces:
+      - book_source
+    tools_available:
+      - book_ingest
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Text layer exists and page markers line up with the printed pages
+      - Every illustration that could depict a person was extracted with its caption
+    success_criteria:
+      - Schema-valid book_source artifact
+      - text.txt is non-empty and its language is detected
+
+  - name: character_bible
+    skill: pipelines/book-scene/casting-director
+    required_artifacts_in:
+      - book_source
+    produces:
+      - character_bible
+    tools_available:
+      - character_bible
+      - image_selector
+      - gemini_fal_image
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Every on-screen character has verbatim source quotes for its appearance
+      - A book illustration of a character always beats a generated identity
+      - Generated angles keep the face, hair, build and wardrobe of the frontal image
+      - Nothing in physical_description contradicts the book
+    success_criteria:
+      - Schema-valid character_bible saved through the character_bible tool
+      - Every character that will appear on screen has an approved frontal reference and locked=true
+
+  - name: proposal
+    skill: pipelines/book-scene/proposal-director
+    required_artifacts_in:
+      - book_source
+      - character_bible
+    produces:
+      - proposal_packet
+      - decision_log
+    tools_available:
+      - book_ingest
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - The chosen passage is quoted with exact page range
+      - Delivery promise is motion_required with generated video clips
+      - Cost estimate counts every generated second and every reference image
+    success_criteria:
+      - Schema-valid proposal_packet with approval recorded
+      - Passage length fits the target runtime (roughly 1 shot per 1-3 sentences)
+
+  - name: scene_plan
+    skill: pipelines/book-scene/scene-director
+    required_artifacts_in:
+      - proposal_packet
+      - character_bible
+      - book_source
+    produces:
+      - scene_plan
+      - book_shot_list
+    tools_available:
+      - character_bible
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Every shot source_quote is verbatim from the passage (character_bible check_shot_list passes)
+      - No event, object or line of dialogue that the passage does not contain
+      - Characters are referenced only through @Element tags
+      - Fidelity critic approved with score >= 8
+    success_criteria:
+      - Schema-valid scene_plan and book_shot_list
+      - check_shot_list returns passed=true
+      - book_shot_list.fidelity_review.approved is true
+
+  - name: assets
+    skill: pipelines/book-scene/asset-director
+    required_artifacts_in:
+      - book_shot_list
+      - scene_plan
+      - character_bible
+    produces:
+      - asset_manifest
+    required_tools:
+      - kling_o3_fal_video
+      - character_bible
+    tools_available:
+      - kling_o3_fal_video
+      - video_selector
+      - character_bible
+      - frame_sampler
+      - visual_qa
+      - tts_selector
+      - music_gen
+      - pixabay_music
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Each clip was generated with reference_to_video and the bound elements
+      - The character is recognisably the same person in every clip
+      - Clips depict the quoted action and nothing the book contradicts
+    success_criteria:
+      - Schema-valid asset_manifest
+      - One video asset per shot, all files exist on disk
+
+  - name: edit
+    skill: pipelines/cinematic/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Shot order follows the order of the passage
+      - Optional captions use the verbatim book text
+    success_criteria:
+      - Schema-valid edit_decisions covering every shot
+
+  - name: compose
+    skill: pipelines/cinematic/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    tools_available:
+      - video_compose
+      - video_stitch
+      - audio_mixer
+      - color_grade
+      - subtitle_gen
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Output matches the approved shot list order and runtime
+      - Character identity holds across the cut
+    success_criteria:
+      - Schema-valid render_report
+      - Output file exists and passes ffprobe validation

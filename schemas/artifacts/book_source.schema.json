@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/artifacts/book_source",
+  "title": "Book Source",
+  "description": "An ingested book: full text with [[page N]] markers plus every embedded illustration with its caption/nearby text. Produced by the book_ingest tool.",
+  "type": "object",
+  "required": ["version", "book_id", "title", "source_path", "text_path", "language", "page_count", "images"],
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "book_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "title": { "type": "string" },
+    "source_path": { "type": "string" },
+    "text_path": { "type": "string", "description": "UTF-8 text file with [[page N]] markers" },
+    "language": { "type": "string", "description": "Detected main script, e.g. he, en, ar, ru" },
+    "page_count": { "type": "integer", "minimum": 0 },
+    "char_count": { "type": "integer", "minimum": 0 },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "page"],
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "page": { "type": "integer" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "context": { "type": "string", "description": "Caption or text near the image" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

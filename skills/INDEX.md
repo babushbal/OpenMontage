@@ -140,6 +140,7 @@ Pipeline type skills provide production guidance for specific video formats, ind
 | Animation Pipeline | `creative/animation-pipeline.md` | Motion graphics, easing, transitions, composition |
 | 3D World Generation | `creative/3d-world-generation.md` | Continuous Three.js terrain worlds with semantic regions, explicit blockout/production tiers, licensed GLTF/PBR assets, diagnostics, and deterministic camera paths |
 | Character Animation Pipeline | `pipelines/character-animation/` | Rigged local cartoon characters, pose libraries, action timelines, SVG/Canvas/Remotion/HyperFrames rendering |
+| Book Scene Pipeline | `pipelines/book-scene/` | A scene from an uploaded book as video: book ingest, character bible from the book's illustrations, quote-anchored director shot list, fidelity critic, Kling O3 reference-to-video |
 | Cinematic | `creative/cinematic.md` | Letterbox, film pacing, layered audio, color grading |
 
 ## Pipeline Stage Director Skills
