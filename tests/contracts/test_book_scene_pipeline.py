@@ -72,7 +72,7 @@ def _shot_list(prompt="@Element1 opens the door and steps into the rain", quote=
 def test_manifest_loads_with_custom_stages():
     assert load_pipeline("book-scene")["stages"]
     assert get_pipeline_stages("book-scene") == [
-        "book_ingest", "character_bible", "proposal", "scene_plan", "assets", "edit", "compose"]
+        "book_ingest", "scene_scout", "character_bible", "proposal", "scene_plan", "assets", "edit", "compose"]
 
 
 def test_manifest_skills_and_tools_exist():
@@ -186,3 +186,118 @@ def test_ingest_docx_pages_and_images(tmp_path):
     assert src["images"] and src["images"][0]["context"] == "אבי ליד הנהר"
     page2 = BookIngest().execute({"operation": "pages", "book_id": "docx-book", "page_start": 2}).data["text"]
     assert "הורג הלטאות" in page2 and "הבקר" not in page2
+
+
+# ---------------------------------------------------------------- scout + assemble
+
+def _ingest_text(tmp_path, text: str, book_id="scout-book"):
+    p = tmp_path / "b.txt"
+    p.write_text(text, encoding="utf-8")
+    assert BookIngest().execute({"operation": "ingest", "book_path": str(p), "book_id": book_id}).success
+    return book_id
+
+
+HEB = ("פרק א\nיום אחד, בזמן שרעה את הבקר, עברה לידו לטאה גדולה. הוא התקרב אליה עם מקלו.\n"
+       "פרק ב\nזמן קצר לפני שנפטר, הגיע לביתי, מסר לי יומן ואמר לי: \"מתישהו תכתוב עליי\".\n"
+       "צגאיה אשתה: \"באופן אישי קראתי לך 'אור'.\"\n") * 3
+
+
+def test_sections_cover_the_whole_book(tmp_path):
+    bid = _ingest_text(tmp_path, HEB)
+    res = BookIngest().execute({"operation": "sections", "book_id": bid, "section_chars": 150})
+    assert res.success and res.data["count"] > 1
+    full = (book_paths.BOOKS_DIR / bid / "text.txt").read_text(encoding="utf-8")
+    joined = "".join(BookIngest().execute({"operation": "sections", "book_id": bid, "section_chars": 150,
+                                           "section": i}).data["text"] for i in range(1, res.data["count"] + 1))
+    assert joined == full
+
+
+def test_passage_is_verbatim_and_tolerates_niqqud_and_quote_styles(tmp_path):
+    bid = _ingest_text(tmp_path, HEB)
+    res = BookIngest().execute({"operation": "passage", "book_id": bid,
+                                "start_quote": "יוֹם אחד, בזמן", "end_quote": "עם מקלו."})
+    assert res.success, res.error
+    assert res.data["text"].startswith("יום אחד") and res.data["text"].endswith("עם מקלו.")
+    res = BookIngest().execute({"operation": "passage", "book_id": bid,
+                                "start_quote": "ואמר לי: “מתישהו", "end_quote": "עליי”."})
+    assert res.success, res.error
+
+
+def test_verify_candidates_rejects_invented_quotes(tmp_path):
+    bid = _ingest_text(tmp_path, HEB)
+    good = {"id": "c1", "title": "הורג הלטאות", "start_quote": "יום אחד, בזמן שרעה", "end_quote": "עם מקלו.",
+            "page_start": 1, "page_end": 1, "summary": "...", "characters": ["אבי"], "visual_score": 5,
+            "est_shots": 4, "est_seconds": 25, "readable_text": []}
+    bad = dict(good, id="c2", end_quote="והלטאה ברחה ליער.", readable_text=["משפט שלא בספר"])
+    sc = {"version": "1.0", "book_id": bid, "candidates": [good, bad], "selected": ["c1", "c9"]}
+    res = BookIngest().execute({"operation": "verify_candidates", "book_id": bid, "scene_candidates": sc})
+    assert res.success, res.error
+    issues = " | ".join(res.data["issues"])
+    assert not res.data["passed"]
+    assert "c2: start_quote/end_quote" in issues and "c2: readable_text" in issues and "c9" in issues
+    assert "c1:" not in issues
+
+
+def test_text_overlays_must_be_verbatim_from_the_book(tmp_path):
+    bid = _ingest_text(tmp_path, HEB, book_id="little-book")
+    tool = CharacterBible()
+    tool.execute({"operation": "save", "book_id": bid, "character_bible": _bible(bid, str(_png(tmp_path / "a.png")))})
+    sl = _shot_list()
+    sl["passage"]["text"] = "Anna opened the door and stepped into the rain."
+    sl["shots"][0]["text_overlays"] = [{"text": "באופן אישי קראתי לך 'אור'.", "attribution": "צגאיה אשתה"}]
+    assert tool.execute({"operation": "check_shot_list", "book_id": bid, "book_shot_list": sl}).data["passed"]
+    sl["shots"][0]["text_overlays"][0]["text"] = "מילים שאף אחד לא כתב"
+    res = tool.execute({"operation": "check_shot_list", "book_id": bid, "book_shot_list": sl})
+    assert not res.data["passed"] and "text_overlay" in res.data["issues"][0]
+
+
+def test_assemble_outputs_final_clean_and_matching_srt(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import tools.book.book_scene_assemble as asm
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    monkeypatch.setattr(asm, "PROJECTS_DIR", tmp_path / "projects")
+    root = tmp_path / "projects" / "demo"
+    shots = root / "assets" / "shots"
+    shots.mkdir(parents=True)
+    for sid, color in (("s1", "red"), ("s2", "blue")):
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=320x180:d=2:r=24",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shots / f"{sid}.mp4")], check=True)
+    passage = "יום אחד, בזמן שרעה את הבקר. הוא התקרב אליה עם מקלו."
+    sl = {"version": "1.0", "book_id": "x", "passage": {"text": passage, "page_start": 1, "page_end": 1},
+          "shots": [{"id": "s1", "scene_id": "s1", "source_quote": "יום אחד, בזמן שרעה את הבקר.", "character_ids": [],
+                     "video_prompt": "field", "duration_seconds": 3},
+                    {"id": "s2", "scene_id": "s2", "source_quote": "הוא התקרב אליה עם מקלו.", "character_ids": [],
+                     "video_prompt": "stick", "duration_seconds": 3,
+                     "text_overlays": [{"text": "באופן אישי קראתי לך 'אור'.", "attribution": "צגאיה אשתה", "seconds": 2}]}],
+          "fidelity_review": {"score": 9, "approved": True, "issues": []}}
+    (root / "book_shot_list.json").write_text(json.dumps(sl, ensure_ascii=False), encoding="utf-8")
+    res = asm.BookSceneAssemble().execute({"project_id": "demo", "order": ["s2", "s1"], "resolution": "320x180",
+                                           "end_card": {"title": "סוף", "seconds": 1.5}})
+    assert res.success, res.error
+    d = res.data
+    assert d["order"] == ["s2", "s1"]
+    assert d["duration_seconds"] == pytest.approx(d["clean_duration_seconds"] + 1.5, abs=0.2)
+    srt = Path(d["srt"]).read_text(encoding="utf-8-sig")
+    blocks = [b for b in srt.strip().split("\n\n") if b]
+    assert len(blocks) == 2
+    assert "הוא התקרב" in blocks[0] and "יום אחד" in blocks[1]          # follows the requested order
+    assert all(line.startswith("‏") and line.endswith("‏")      # RTL marks on every caption line
+               for b in blocks for line in b.split("\n")[2:])
+    last_end = blocks[-1].split("\n")[1].split(" --> ")[1]
+    h, m, rest = last_end.split(":")
+    assert float(rest.replace(",", ".")) <= d["clean_duration_seconds"]   # SRT fits the clean cut
+
+
+def test_render_tool_refuses_a_shot_list_that_fails_the_gate(tmp_path, monkeypatch):
+    import tools.book.book_shot_render as rnd
+    monkeypatch.setattr(rnd, "PROJECTS_DIR", tmp_path / "projects")
+    tool = CharacterBible()
+    tool.execute({"operation": "save", "book_id": "little-book",
+                  "character_bible": _bible("little-book", str(_png(tmp_path / "a.png")), locked=False)})
+    root = tmp_path / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "book_shot_list.json").write_text(json.dumps(_shot_list(), ensure_ascii=False), encoding="utf-8")
+    res = rnd.BookShotRender().execute({"project_id": "p", "book_id": "little-book"})
+    assert not res.success and "fidelity gate" in res.error and "not locked" in res.error

@@ -1,7 +1,8 @@
 name: book-scene
 version: "0.1"
 description: >
-  Book-to-scene adaptation. Ingests an uploaded book (PDF/EPUB/TXT), builds a
+  Book-to-scene adaptation. Ingests an uploaded book (PDF/EPUB/DOCX/TXT), a scene
+  scout proposes a menu of filmable scenes for the user to pick from, then it builds a
   book-level character bible whose identities come from the book's own
   illustrations when they exist, then has a director agent turn one passage into
   a shot list where every shot is anchored to a verbatim quote. A video agent
@@ -20,13 +21,14 @@ extensions:
 required_skills:
   - pipelines/book-scene/executive-producer
   - pipelines/book-scene/ingest-director
+  - pipelines/book-scene/scout-director
   - pipelines/book-scene/casting-director
   - pipelines/book-scene/proposal-director
   - pipelines/book-scene/scene-director
   - pipelines/book-scene/fidelity-critic
   - pipelines/book-scene/asset-director
   - pipelines/cinematic/edit-director
-  - pipelines/cinematic/compose-director
+  - pipelines/book-scene/compose-director
   - creative/video-gen-prompting
   - meta/reviewer
   - meta/checkpoint-protocol
@@ -62,10 +64,30 @@ stages:
       - Schema-valid book_source artifact
       - text.txt is non-empty and its language is detected
 
+  - name: scene_scout
+    skill: pipelines/book-scene/scout-director
+    required_artifacts_in:
+      - book_source
+    produces:
+      - scene_candidates
+    tools_available:
+      - book_ingest
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - The whole book was read, section by section - candidates come from all of it, not just the opening
+      - Every candidate's start_quote and end_quote are verbatim (book_ingest verify_candidates passes)
+      - Candidates are showable (action, place, a turn) and the menu mixes tones
+      - Missing identities (real people without photos) and readable text are flagged up front
+    success_criteria:
+      - Schema-valid scene_candidates with 5-12 candidates
+      - The user picked at least one candidate (selected is recorded)
+
   - name: character_bible
     skill: pipelines/book-scene/casting-director
     required_artifacts_in:
       - book_source
+      - scene_candidates
     produces:
       - character_bible
     tools_available:
@@ -87,6 +109,7 @@ stages:
     skill: pipelines/book-scene/proposal-director
     required_artifacts_in:
       - book_source
+      - scene_candidates
       - character_bible
     produces:
       - proposal_packet
@@ -135,9 +158,10 @@ stages:
     produces:
       - asset_manifest
     required_tools:
-      - kling_o3_fal_video
+      - book_shot_render
       - character_bible
     tools_available:
+      - book_shot_render
       - kling_o3_fal_video
       - video_selector
       - character_bible
@@ -173,18 +197,20 @@ stages:
       - Schema-valid edit_decisions covering every shot
 
   - name: compose
-    skill: pipelines/cinematic/compose-director
+    skill: pipelines/book-scene/compose-director
     required_artifacts_in:
       - edit_decisions
       - asset_manifest
     optional_artifacts_in:
       - scene_plan
+      - book_shot_list
     produces:
       - render_report
       - final_review
     required_tools:
-      - video_compose
+      - book_scene_assemble
     tools_available:
+      - book_scene_assemble
       - video_compose
       - video_stitch
       - audio_mixer
@@ -195,6 +221,9 @@ stages:
     review_focus:
       - Output matches the approved shot list order and runtime
       - Character identity holds across the cut
+      - RTL captions keep punctuation on the correct side (check a frame up close)
+      - Readable book text comes from text_overlays, never from the video model
+      - A clean cut + SRT is delivered for external editing
     success_criteria:
       - Schema-valid render_report
       - Output file exists and passes ffprobe validation

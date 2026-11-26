@@ -215,6 +215,9 @@ class CharacterBible(BaseTool):
         sl = inputs["book_shot_list"]
         validate_artifact("book_shot_list", sl)
         passage = _norm(sl["passage"]["text"])
+        text_path = book_dir(inputs["book_id"]) / "text.txt"
+        book_text = (_norm(re.sub(r"\[\[page \d+\]\]", " ", text_path.read_text(encoding="utf-8")))
+                     if text_path.exists() else None)
         issues: list[str] = []
         names = {}
         for c in bible.values():
@@ -239,6 +242,11 @@ class CharacterBible(BaseTool):
             if expected - tags:
                 issues.append(f"{sid}: characters bound but never referenced in prompt: "
                               f"{[shot['character_ids'][i - 1] for i in sorted(expected - tags)]}")
+            for ov in shot.get("text_overlays", []):
+                if book_text is None:
+                    issues.append(f"{sid}: text_overlays need the ingested book text to verify")
+                elif _norm(ov["text"]) not in book_text:
+                    issues.append(f"{sid}: text_overlay is not verbatim from the book: {ov['text'][:40]}...")
             for n, cid in names.items():
                 if re.search(rf"\b{re.escape(n)}\b", shot["video_prompt"]):
                     issues.append(f"{sid}: prompt names {n!r} directly - use its @Element tag so identity comes from the reference")

@@ -34,6 +34,7 @@ ARTIFACT_NAMES = [
     "book_source",
     "character_bible",
     "book_shot_list",
+    "scene_candidates",
 ]
 
 

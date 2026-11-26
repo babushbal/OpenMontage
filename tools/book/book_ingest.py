@@ -37,6 +37,31 @@ def detect_language(text: str) -> str:
     return lang if n else "unknown"
 
 
+_CHAR_MAP = {"״": '"', "׳": "'", "“": '"', "”": '"',
+             "‘": "'", "’": "'", "–": "-", "—": "-"}
+
+
+def _norm_chars(text: str) -> list[str | None]:
+    """Per-character version of character_bible._norm: one entry per raw char, None when the
+    char disappears (niqqud, repeated whitespace, page markers). Lets a match in normalised
+    text be mapped back to the exact raw span."""
+    masked = re.sub(r"\[\[page \d+\]\]", lambda m: " " * len(m.group()), text)
+    out: list[str | None] = []
+    prev_space = True
+    for ch in masked:
+        if "֑" <= ch <= "ׇ":
+            out.append(None)
+            continue
+        ch = _CHAR_MAP.get(ch, ch)
+        if ch.isspace():
+            out.append(None if prev_space else " ")
+            prev_space = True
+        else:
+            out.append(ch)
+            prev_space = False
+    return out
+
+
 def pages_slice(text: str, first: int, last: int) -> str:
     """Text of pages first..last (inclusive) from a [[page N]]-marked text."""
     m1 = re.search(rf"\[\[page {first}\]\]", text)
@@ -209,11 +234,16 @@ class BookIngest(BaseTool):
         "type": "object",
         "required": ["operation"],
         "properties": {
-            "operation": {"type": "string", "enum": ["ingest", "pages"]},
+            "operation": {"type": "string", "enum": ["ingest", "pages", "sections", "passage", "verify_candidates"]},
             "book_path": {"type": "string", "description": "ingest: path to .pdf/.epub/.docx/.txt/.md"},
             "book_id": {"type": "string", "description": "Optional stable slug; defaults to the file name"},
             "page_start": {"type": "integer", "description": "pages: first page"},
             "page_end": {"type": "integer", "description": "pages: last page (inclusive)"},
+            "section_chars": {"type": "integer", "description": "sections: target size of each reading chunk (default 20000)"},
+            "section": {"type": "integer", "description": "sections: return the text of this section (1-based); omit for the index"},
+            "start_quote": {"type": "string", "description": "passage: verbatim first words"},
+            "end_quote": {"type": "string", "description": "passage: verbatim last words"},
+            "scene_candidates": {"type": "object", "description": "verify_candidates: the scout's artifact"},
         },
     }
     resource_profile = ResourceProfile(cpu_cores=1, ram_mb=512, vram_mb=0, disk_mb=500, network_required=False)
@@ -234,11 +264,102 @@ class BookIngest(BaseTool):
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         start = time.time()
         try:
-            if inputs.get("operation") == "pages":
+            op = inputs.get("operation")
+            if op == "pages":
                 return self._pages(inputs, start)
+            if op == "sections":
+                return self._sections(inputs, start)
+            if op == "passage":
+                return self._passage(inputs, start)
+            if op == "verify_candidates":
+                return self._verify_candidates(inputs, start)
             return self._ingest(inputs, start)
         except Exception as exc:  # noqa: BLE001 - surfaced to the agent
             return ToolResult(success=False, error=f"{type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def _text(book_id: str) -> str:
+        return (book_dir(book_id) / "text.txt").read_text(encoding="utf-8")
+
+    def _sections(self, inputs, start) -> ToolResult:
+        """Split the book into reading chunks on paragraph boundaries so a scout can read
+        a long book section by section without losing its place."""
+        text = self._text(inputs["book_id"])
+        size = int(inputs.get("section_chars") or 20000)
+        bounds, pos = [], 0
+        while pos < len(text):
+            end = min(len(text), pos + size)
+            if end < len(text):
+                cut = text.rfind("\n", pos + size // 2, end)
+                end = cut + 1 if cut > 0 else end
+            bounds.append((pos, end))
+            pos = end
+        index = []
+        for i, (a, b) in enumerate(bounds, start=1):
+            pages = [int(m) for m in re.findall(r"\[\[page (\d+)\]\]", text[:b])]
+            first = ([int(m) for m in re.findall(r"\[\[page (\d+)\]\]", text[:a + 1])] or [1])[-1]
+            index.append({"section": i, "chars": b - a, "page_start": first,
+                          "page_end": pages[-1] if pages else first,
+                          "opening": text[a:a + 120].strip().replace("\n", " ")})
+        data: dict[str, Any] = {"sections": index, "count": len(index)}
+        if inputs.get("section"):
+            a, b = bounds[int(inputs["section"]) - 1]
+            data["text"] = text[a:b]
+        return ToolResult(success=True, data=data, duration_seconds=time.time() - start)
+
+    @staticmethod
+    def _locate(text: str, start_quote: str, end_quote: str) -> tuple[int, int] | None:
+        from tools.book.character_bible import _norm
+        # map normalised positions back to the raw text so the passage is returned verbatim
+        raw_idx, norm_chars = [], []
+        for i, ch in enumerate(_norm_chars(text)):
+            if ch is not None:
+                raw_idx.append(i)
+                norm_chars.append(ch)
+        norm = "".join(norm_chars)
+        a = norm.find(_norm(start_quote))
+        if a < 0:
+            return None
+        b = norm.find(_norm(end_quote), a)
+        if b < 0:
+            return None
+        b_end = b + len(_norm(end_quote)) - 1
+        return raw_idx[a], raw_idx[b_end] + 1
+
+    def _passage(self, inputs, start) -> ToolResult:
+        text = self._text(inputs["book_id"])
+        span = self._locate(text, inputs["start_quote"], inputs["end_quote"])
+        if span is None:
+            return ToolResult(success=False, error="start_quote/end_quote not found verbatim (in that order) in the book")
+        a, b = span
+        passage = re.sub(r"\n?\[\[page \d+\]\]\n?", "\n", text[a:b]).strip()
+        pages = [int(m) for m in re.findall(r"\[\[page (\d+)\]\]", text[:b])] or [1]
+        first = ([int(m) for m in re.findall(r"\[\[page (\d+)\]\]", text[:a + 1])] or [1])[-1]
+        return ToolResult(success=True, data={"text": passage, "page_start": first, "page_end": pages[-1],
+                                              "chars": len(passage)}, duration_seconds=time.time() - start)
+
+    def _verify_candidates(self, inputs, start) -> ToolResult:
+        from schemas.artifacts import validate_artifact as _validate
+        sc = inputs["scene_candidates"]
+        _validate("scene_candidates", sc)
+        text = self._text(inputs["book_id"])
+        from tools.book.character_bible import _norm
+        norm_text = _norm(re.sub(r"\[\[page \d+\]\]", " ", text))
+        issues, ids = [], set()
+        for c in sc["candidates"]:
+            if c["id"] in ids:
+                issues.append(f"{c['id']}: duplicate id")
+            ids.add(c["id"])
+            if self._locate(text, c["start_quote"], c["end_quote"]) is None:
+                issues.append(f"{c['id']}: start_quote/end_quote not found verbatim and in order")
+            for t in c.get("readable_text", []):
+                if _norm(t) not in norm_text:
+                    issues.append(f"{c['id']}: readable_text is not verbatim: {t[:40]}...")
+        for sid in sc.get("selected", []):
+            if sid not in ids:
+                issues.append(f"selected id {sid!r} is not a candidate")
+        return ToolResult(success=True, data={"passed": not issues, "issues": issues},
+                          duration_seconds=time.time() - start)
 
     def _pages(self, inputs, start) -> ToolResult:
         root = book_dir(inputs["book_id"])

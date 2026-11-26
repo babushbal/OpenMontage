@@ -4,6 +4,15 @@
 Render each shot of the approved `book_shot_list` with **reference-to-video**, so character
 identity comes from the locked references, and record the clips in `asset_manifest`.
 
+## Normal path: one tool
+`book_shot_render` `{"project_id": ..., "book_id": ..., "shot_ids": ["s1"]}` renders the sample
+shot; run it again without `shot_ids` for the rest. It re-checks the fidelity gate, binds the
+locked identities, handles continuity frames and skips shots that already exist (delete a
+file to re-render it). Run long renders in the background and plan the next scene meanwhile.
+Set `FAL_KEY` (a placeholder is fine when the session's proxy injects the real key).
+
+The steps below are what the tool does — follow them by hand only when you need a variant.
+
 ## Per shot
 1. `character_bible` `{"operation": "kling_elements", "book_id": ..., "character_ids": shot.character_ids}`
    → `elements` (order = @Element1..N) and the binding. Never reorder.
@@ -28,6 +37,12 @@ identity comes from the locked references, and record the clips in `asset_manife
    drifted or the action is wrong, regenerate once with a tightened prompt; never silently accept.
 4. Save under `projects/<project_id>/assets/shots/<shot.id>.mp4`; append to `asset_manifest`
    (`type: video`, `scene_id`, `prompt`, `model`, `cost_usd`, `duration_seconds`, `source_tool: kling_o3_fal_video`).
+
+## When something fails
+- 403 "Exhausted balance": stop and ask the user to top up fal; nothing was charged.
+- A single 403/5xx on one shot while others succeeded: re-run the tool once (existing shots
+  are skipped). Don't loop.
+- Never probe fal with an empty or test request — a request that passes validation is billed.
 
 ## Order
 Render shot 1 first and show it to the user (sample gate). Then the rest. Refresh

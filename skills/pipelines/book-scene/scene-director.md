@@ -5,7 +5,8 @@ Turn the approved passage into a shot list that a video model can render **faith
 **with consistent characters**. You write the prompts; the video agent only executes them.
 
 ## Inputs
-- Passage text: `book_ingest` `pages` for the approved page range, trimmed to the approved excerpt.
+- Passage text: `book_ingest` `{"operation": "passage", "start_quote": ..., "end_quote": ...}` with
+  the selected candidate's quotes (or `pages` for a page range) — exact text, verbatim.
 - `character_bible` (locked characters + `visual_style`).
 - Read `skills/creative/video-gen-prompting.md` (Kling section) before writing prompts.
 
@@ -26,8 +27,18 @@ Turn the approved passage into a shot list that a video model can render **faith
 5. **Dialogue** only if spoken in the quote, copied verbatim into `dialogue`. Lip-synced
    speech in non-English languages is weak on current models: prefer silent acting plus a
    caption, unless the user asked for spoken audio.
-6. **Continuity.** Set `continuity_from_previous: true` when the next shot continues the same
-   moment and camera space; the video agent then starts it from the previous last frame.
+6. **Continuity.** Set `continuity_from_previous: true` only when the next shot continues the
+   same moment **and** camera space; the video agent then starts it from the previous last
+   frame. Never across a change of angle or location — it drags the old composition along.
+7. **Readable text** (a letter, diary page, sign, dedication): the video model writes fake
+   letters. Prompt the object without legible text ("pages filled with handwriting") and put
+   the real words, verbatim from anywhere in the book, in the shot's `text_overlays` with the
+   writer as `attribution`. The assembler composites them.
+8. **One look per scene.** Repeat the same style line in every prompt. If the first rendered
+   shot came out in a different look (photo references push realism), switch the remaining
+   prompts to that look instead of mixing styles. Keep recurring props (an animal, an object)
+   described identically from shot to shot.
+9. **Real people** without a photo stay off-camera (from behind, hands only).
 
 ## Output
 - `book_shot_list` (`schemas/artifacts/book_shot_list.schema.json`).

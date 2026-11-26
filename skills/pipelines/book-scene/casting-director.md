@@ -4,6 +4,10 @@
 Build or extend the book-level `character_bible` so every character who will be on screen has
 a **locked, approved identity**. This is what makes characters consistent; take it seriously.
 
+## 0. Scope
+Cast for the scenes the user picked in `scene_candidates.selected` — their `characters`,
+`character_age_notes` and `needs_references` tell you who and which age variants.
+
 ## 1. Read before you cast
 - Load the existing bible: `character_bible` `{"operation": "load", "book_id": ...}`.
 - Find every passage that describes each character's looks (face, hair, age, build, skin,
@@ -42,6 +46,18 @@ frontal is a book illustration, keep the book's drawing style in the angles.
 Show the user, per character: the frontal, the angles, the quotes and the origin. After they
 approve, set `locked: true` and `save`. A locked character is never regenerated; recasting
 needs the user's explicit request and `unlock: true`.
+
+## 6. Real people and age variants
+- In a memoir or family book the characters are real. Ask the user for a photo of every
+  on-screen person (the subject, the narrator/author, relatives). Crop other people out of
+  group photos before importing (`slot: frontal`, `origin: user_supplied`). A drawing of the
+  person in the book's style makes a good extra angle.
+- When the scene shows the person at another age (childhood, old age), add a separate
+  character (e.g. `abi_child`) generated with `gemini_fal_image` **image_edit** from the adult
+  photo + drawing: "this same person as a 9-year-old boy, keep the exact face...". Make 2
+  candidates, the user picks, then generate the angles from the chosen one and lock it.
+- Never alter a real person's face to "improve" a match; if no candidate looks like them,
+  ask the user what is wrong rather than regenerating blindly.
 
 Cast only characters who appear in the scene being made, but write them into the shared bible
 so the next scene of the same book reuses them.
