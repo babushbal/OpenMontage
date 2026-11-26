@@ -1,4 +1,4 @@
-"""Ingest a PDF / EPUB / TXT book into text with page markers plus its illustrations.
+"""Ingest a PDF / EPUB / DOCX / TXT book into text with page markers plus its illustrations.
 
 Output (under books/<book_id>/):
   text.txt            full text, every page prefixed with [[page N]]
@@ -125,6 +125,65 @@ def _epub(path: Path, img_dir: Path) -> tuple[list[str], list[dict]]:
     return pages, images
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+
+def _docx(path: Path, img_dir: Path) -> tuple[list[str], list[dict]]:
+    """Word .docx without extra dependencies. Pages follow Word's own page breaks
+    (explicit breaks and the last-rendered layout); a document saved without layout
+    info comes out as one page."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    with zipfile.ZipFile(path) as z:
+        body = ET.fromstring(z.read("word/document.xml")).find(f"{_W}body")
+        rels = {}
+        if "word/_rels/document.xml.rels" in z.namelist():
+            for rel in ET.fromstring(z.read("word/_rels/document.xml.rels")):
+                rels[rel.get("Id")] = rel.get("Target", "")
+        pages: list[list[str]] = [[]]
+        images: list[dict] = []
+        for para in body.iter(f"{_W}p"):
+            parts = []
+            for node in para.iter():
+                if node.tag in (f"{_W}lastRenderedPageBreak",) or (
+                        node.tag == f"{_W}br" and node.get(f"{_W}type") == "page"):
+                    if pages[-1] or parts:
+                        pages[-1].append("".join(parts))
+                        parts = []
+                        pages.append([])
+                elif node.tag == f"{_W}t" and node.text:
+                    parts.append(node.text)
+                elif node.tag == f"{_W}tab":
+                    parts.append("\t")
+                elif node.tag == f"{_A}blip":
+                    target = rels.get(node.get(f"{_R}embed"), "")
+                    member = "word/" + target.lstrip("/").removeprefix("word/")
+                    if member not in z.namelist():
+                        continue
+                    img_id = f"d{len(pages)}_{len(images)}"
+                    out = img_dir / f"{img_id}{Path(target).suffix or '.png'}"
+                    out.write_bytes(z.read(member))
+                    try:
+                        w, h = _img_size(out)
+                    except Exception:
+                        out.unlink()
+                        continue
+                    if min(w, h) < MIN_IMAGE_SIDE:
+                        out.unlink()
+                        continue
+                    images.append({"id": img_id, "path": str(out), "page": len(pages),
+                                   "width": w, "height": h, "context": ""})
+            text = "".join(parts)
+            pages[-1].append(text)
+            for img in images:  # caption = first non-empty paragraph after the picture
+                if not img["context"] and img["page"] == len(pages) and text.strip():
+                    img["context"] = text.strip()[:600]
+    return ["\n".join(p for p in page if p.strip()) for page in pages], images
+
+
 class BookIngest(BaseTool):
     name = "book_ingest"
     version = "0.1.0"
@@ -141,7 +200,7 @@ class BookIngest(BaseTool):
 
     capabilities = ["book_ingest", "extract_book_text", "extract_book_illustrations", "page_slice"]
     best_for = [
-        "turning an uploaded PDF/EPUB/TXT book into page-marked text",
+        "turning an uploaded PDF/EPUB/DOCX/TXT book into page-marked text",
         "extracting a book's character illustrations for identity references",
     ]
     not_good_for = ["scanned image-only PDFs without a text layer (run OCR first)"]
@@ -151,7 +210,7 @@ class BookIngest(BaseTool):
         "required": ["operation"],
         "properties": {
             "operation": {"type": "string", "enum": ["ingest", "pages"]},
-            "book_path": {"type": "string", "description": "ingest: path to .pdf/.epub/.txt/.md"},
+            "book_path": {"type": "string", "description": "ingest: path to .pdf/.epub/.docx/.txt/.md"},
             "book_id": {"type": "string", "description": "Optional stable slug; defaults to the file name"},
             "page_start": {"type": "integer", "description": "pages: first page"},
             "page_end": {"type": "integer", "description": "pages: last page (inclusive)"},
@@ -203,10 +262,12 @@ class BookIngest(BaseTool):
             pages, images = _pdf(src, img_dir)
         elif ext == ".epub":
             pages, images = _epub(src, img_dir)
+        elif ext == ".docx":
+            pages, images = _docx(src, img_dir)
         elif ext in (".txt", ".md"):
             pages, images = [src.read_text(encoding="utf-8")], []
         else:
-            return ToolResult(success=False, error=f"Unsupported format {ext}; use pdf, epub or txt")
+            return ToolResult(success=False, error=f"Unsupported format {ext}; use pdf, epub, docx or txt")
 
         text = "".join(f"\n[[page {i}]]\n{p}" for i, p in enumerate(pages, start=1))
         if len(text.strip()) < 50 and images:

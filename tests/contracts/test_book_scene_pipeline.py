@@ -158,3 +158,31 @@ def test_check_shot_list(tmp_path, prompt, quote, expected):
     assert res.data["passed"] is (not expected)
     for fragment in expected:
         assert fragment in issues, issues
+
+
+def test_ingest_docx_pages_and_images(tmp_path):
+    import zipfile
+    _png(tmp_path / "pic.png")
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    a = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    r = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    doc = (f'<w:document {w} {a} {r}><w:body>'
+           '<w:p><w:r><w:t>אבי רעה את הבקר.</w:t></w:r></w:p>'
+           '<w:p><w:r><w:drawing><a:blip r:embed="rId9"/></w:drawing></w:r></w:p>'
+           '<w:p><w:r><w:t>אבי ליד הנהר</w:t></w:r></w:p>'
+           '<w:p><w:r><w:br w:type="page"/><w:t>הורג הלטאות!</w:t></w:r></w:p>'
+           '</w:body></w:document>')
+    rels = ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId9" Target="media/image1.png"/></Relationships>')
+    book = tmp_path / "ספר.docx"
+    with zipfile.ZipFile(book, "w") as z:
+        z.writestr("word/document.xml", doc)
+        z.writestr("word/_rels/document.xml.rels", rels)
+        z.write(tmp_path / "pic.png", "word/media/image1.png")
+    res = BookIngest().execute({"operation": "ingest", "book_path": str(book), "book_id": "docx-book"})
+    assert res.success, res.error
+    src = res.data["book_source"]
+    assert src["language"] == "he" and src["page_count"] == 2
+    assert src["images"] and src["images"][0]["context"] == "אבי ליד הנהר"
+    page2 = BookIngest().execute({"operation": "pages", "book_id": "docx-book", "page_start": 2}).data["text"]
+    assert "הורג הלטאות" in page2 and "הבקר" not in page2

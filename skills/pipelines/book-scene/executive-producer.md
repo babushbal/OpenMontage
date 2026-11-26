@@ -2,7 +2,7 @@
 
 ## When to Use
 
-The user uploaded a book (PDF / EPUB / TXT) and wants a short video of a scene from it:
+The user uploaded a book (PDF / EPUB / DOCX / TXT) and wants a short video of a scene from it:
 "make a video of the chapter where...", "turn pages 40-42 into a scene", "סרטון של הסצנה שבה...".
 You orchestrate a small crew of agents. Each stage below is one agent role with its own skill:
 
