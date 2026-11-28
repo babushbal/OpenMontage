@@ -100,6 +100,8 @@ class BookSceneAssemble(BaseTool):
             "order": {"type": "array", "items": {"type": "string"}, "description": "Shot ids in cut order (default: shot list order)"},
             "language": {"type": "string", "description": "Caption language code (default: he)"},
             "captions": {"type": "boolean", "description": "Burn captions into the final cut (default true)"},
+            "look": {"type": "string", "enum": ["none", "cinematic"],
+                     "description": "cinematic = film grade (contrast, teal shadows / warm highlights), subtle grain, vignette and 2.39:1 letterbox bars, applied to every shot of both cuts"},
             "end_card": {"type": "object", "properties": {
                 "title": {"type": "string"}, "subtitle": {"type": "string"},
                 "seconds": {"type": "number"}}, "description": "Optional closing card text (prefer verbatim book lines)"},
@@ -150,6 +152,7 @@ class BookSceneAssemble(BaseTool):
         w, h = (int(x) for x in (inputs.get("resolution") or "1280x720").split("x"))
         name = inputs.get("name") or pid
         enc = 177 if lang == "he" else 178 if lang == "ar" else 1
+        look = self._look_vf(inputs.get("look") or "none", w, h)
 
         # 1. normalise every shot (and composite readable text where requested)
         parts: list[tuple[str, Path, float]] = []
@@ -158,9 +161,9 @@ class BookSceneAssemble(BaseTool):
             dst = work / f"{sid}_n.mp4"
             overlays = shots[sid].get("text_overlays") or []
             if overlays:
-                self._overlay_shot(src, dst, overlays, lang, font, w, h, enc, work)
+                self._overlay_shot(src, dst, overlays, lang, font, w, h, enc, work, look)
             else:
-                _run(["-i", str(src), "-vf", f"scale={w}:{h},fps=24,format=yuv420p", "-an",
+                _run(["-i", str(src), "-vf", f"scale={w}:{h},fps=24{look},format=yuv420p", "-an",
                       "-c:v", "libx264", "-crf", "18", str(dst)])
             parts.append((sid, dst, _dur(dst)))
 
@@ -218,13 +221,25 @@ class BookSceneAssemble(BaseTool):
                 "duration_seconds": round(_dur(final), 2), "clean_duration_seconds": round(_dur(clean), 2),
                 "order": order}
 
+    @staticmethod
+    def _look_vf(look: str, w: int, h: int) -> str:
+        """Extra filter chain (leading comma) for a named look."""
+        if look != "cinematic":
+            return ""
+        bar = max(0, round((h - w / 2.39) / 2))
+        return (",eq=contrast=1.08:saturation=0.9:gamma=0.97"
+                ",colorbalance=rs=-0.03:gs=-0.01:bs=0.04:rh=0.04:gh=0.01:bh=-0.03"
+                ",vignette=PI/5,noise=alls=6:allf=t"
+                f",drawbox=x=0:y=0:w=iw:h={bar}:color=black:t=fill"
+                f",drawbox=x=0:y=ih-{bar}:w=iw:h={bar}:color=black:t=fill")
+
     def _concat(self, clips: list[Path], out: Path, work: Path) -> None:
         lst = work / f"{out.stem}_list.txt"
         lst.write_text("".join(f"file '{c.resolve()}'\n" for c in clips), encoding="utf-8")
         _run(["-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(out)])
 
     def _overlay_shot(self, src: Path, dst: Path, overlays: list[dict], lang: str, font: str,
-                      w: int, h: int, enc: int, work: Path) -> None:
+                      w: int, h: int, enc: int, work: Path, look: str = "") -> None:
         """Real book text, one overlay after another, over a slowed and softened copy of the shot."""
         per = [float(o.get("seconds") or max(3.0, min(6.0, len(o["text"]) / 18))) for o in overlays]
         total = sum(per) + 0.6
@@ -246,7 +261,7 @@ class BookSceneAssemble(BaseTool):
         ass_path = work / f"{src.stem}_overlay.ass"
         ass_path.write_text("\n".join(ass) + "\n", encoding="utf-8")
         box_y, box_h = int(h * 0.2), int(h * 0.46)
-        vf = (f"setpts={slow:.3f}*PTS,scale={w}:{h},fps=24,gblur=sigma=7,eq=brightness=0.06:saturation=0.75,"
+        vf = (f"setpts={slow:.3f}*PTS,scale={w}:{h},fps=24{look},gblur=sigma=7,eq=brightness=0.06:saturation=0.75,"
               f"drawbox=x={int(w * 0.09)}:y={box_y}:w={int(w * 0.82)}:h={box_h}:color=0xF3E9D2@0.78:t=fill,"
               f"tpad=stop_mode=clone:stop_duration={total},ass={ass_path},trim=duration={total:.2f},format=yuv420p")
         _run(["-i", str(src), "-vf", vf, "-an", "-c:v", "libx264", "-crf", "18", str(dst)])

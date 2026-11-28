@@ -274,7 +274,7 @@ def test_assemble_outputs_final_clean_and_matching_srt(tmp_path, monkeypatch):
           "fidelity_review": {"score": 9, "approved": True, "issues": []}}
     (root / "book_shot_list.json").write_text(json.dumps(sl, ensure_ascii=False), encoding="utf-8")
     res = asm.BookSceneAssemble().execute({"project_id": "demo", "order": ["s2", "s1"], "resolution": "320x180",
-                                           "end_card": {"title": "סוף", "seconds": 1.5}})
+                                           "end_card": {"title": "סוף", "seconds": 1.5}, "look": "cinematic"})
     assert res.success, res.error
     d = res.data
     assert d["order"] == ["s2", "s1"]
