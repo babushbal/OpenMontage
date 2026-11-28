@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/artifacts/scene_candidates",
+  "title": "Scene Candidates",
+  "description": "The scene scout's menu: passages of the book that would make good short videos, each anchored to verbatim quotes so the user can pick one. Produced after book_ingest, before any money is spent.",
+  "type": "object",
+  "required": ["version", "book_id", "candidates"],
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "book_id": { "type": "string" },
+    "book_summary": { "type": "string", "description": "2-4 sentences: what the book is, in the book's language" },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "start_quote", "end_quote", "page_start", "page_end", "summary", "characters", "visual_score", "est_shots", "est_seconds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^c[0-9]+$" },
+          "title": { "type": "string", "description": "Short name of the scene, book's language" },
+          "chapter": { "type": "string" },
+          "start_quote": { "type": "string", "description": "Verbatim first words of the passage" },
+          "end_quote": { "type": "string", "description": "Verbatim last words of the passage" },
+          "page_start": { "type": "integer" },
+          "page_end": { "type": "integer" },
+          "summary": { "type": "string", "description": "One or two sentences, book's language" },
+          "why": { "type": "string", "description": "Why it works on screen: action, emotion, a turn, a strong image" },
+          "characters": { "type": "array", "items": { "type": "string" }, "description": "Names as written in the book" },
+          "character_age_notes": { "type": "string", "description": "e.g. 'Abi as a child (~9)' - drives which identity variant is needed" },
+          "needs_references": { "type": "array", "items": { "type": "string" }, "description": "Characters with no picture yet: real people need a photo from the user" },
+          "readable_text": { "type": "array", "items": { "type": "string" }, "description": "Verbatim text that must be READABLE on screen (letters, diaries, signs) - rendered as overlays, never by the video model" },
+          "tone": { "type": "string" },
+          "visual_score": { "type": "integer", "minimum": 1, "maximum": 5, "description": "How well it can be shown (not told): 5 = clear action and setting" },
+          "risk_notes": { "type": "string", "description": "Violence, many characters, crowds, heavy dialogue, abstract ideas" },
+          "est_shots": { "type": "integer", "minimum": 1 },
+          "est_seconds": { "type": "integer", "minimum": 3 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "selected": { "type": "array", "items": { "type": "string" }, "description": "Candidate ids the user picked, in production order" },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

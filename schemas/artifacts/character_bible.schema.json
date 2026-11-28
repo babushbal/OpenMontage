@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/artifacts/character_bible",
+  "title": "Character Bible",
+  "description": "Book-level, reusable identity lock for every character that appears on screen. Every visual trait is grounded in a verbatim quote or a book illustration. Reference images are locked once and reused by every scene of the same book.",
+  "type": "object",
+  "required": ["version", "book_id", "visual_style", "characters"],
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "book_id": { "type": "string" },
+    "visual_style": {
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": { "type": "string", "description": "Era, place, medium, palette and lighting of the whole adaptation (English)" },
+        "era": { "type": "string" },
+        "setting": { "type": "string" },
+        "palette": { "type": "array", "items": { "type": "string" } },
+        "source_quotes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "physical_description", "source_quotes", "reference_origin", "references", "locked"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+          "name": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "role": { "type": "string" },
+          "age": { "type": "string" },
+          "physical_description": { "type": "string", "description": "Concrete English description used in every prompt" },
+          "wardrobe": { "type": "string" },
+          "source_quotes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["quote", "page"],
+              "properties": {
+                "quote": { "type": "string", "description": "Verbatim, original language" },
+                "page": { "type": "integer" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "book_image_ids": { "type": "array", "items": { "type": "string" } },
+          "reference_origin": {
+            "type": "string",
+            "enum": ["book_illustration", "user_supplied", "generated_from_text"],
+            "description": "Where the identity comes from. book_illustration and user_supplied always win over generated_from_text."
+          },
+          "references": {
+            "type": "object",
+            "required": ["frontal"],
+            "properties": {
+              "frontal": { "type": "string", "description": "Path to the main identity image" },
+              "angles": { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+            },
+            "additionalProperties": false
+          },
+          "locked": { "type": "boolean", "description": "true once the user approved the references - never regenerate a locked character" },
+          "notes": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

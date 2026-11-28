@@ -18,3 +18,8 @@ watchfiles>=0.21
 
 websockets>=14.0       # Eleven v4 Turbo and realtime audio transports
 pythainlp>=5.0         # Thai word segmentation for karaoke captions
+
+# Book Scene pipeline (book_ingest tool)
+pymupdf>=1.24          # PDF text + illustration extraction
+ebooklib>=0.18         # EPUB reading
+beautifulsoup4>=4.12   # EPUB HTML parsing
